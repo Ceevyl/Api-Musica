@@ -1,38 +1,37 @@
-const ytdl = require('ytdl-core');
+const { spawn } = require('child_process');
 
 class YouTubeStreamService {
   async streamAudio(url, res) {
-    if (!ytdl.validateURL(url)) {
+    if (!url || !url.includes('youtube.com') && !url.includes('youtu.be')) {
       return res.status(400).json({ error: 'URL inválida do YouTube' });
     }
 
-    try {
-      const info = await ytdl.getInfo(url);
-      const format = ytdl.chooseFormat(info.formats, {
-        quality: 'highestaudio',
-        filter: 'audioonly'
-      });
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline; filename="audio.mp3"');
 
-      res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Content-Disposition', 'inline; filename="audio.mp3"');
+    const ytProcess = spawn('yt-dlp', [
+      '-f', 'bestaudio',
+      '-o', '-', // saída para stdout
+      url
+    ]);
 
-      const audioStream = ytdl.downloadFromInfo(info, { format });
+    ytProcess.stdout.pipe(res);
 
-      // Tratar erro de stream do YouTube
-      audioStream.on('error', (err) => {
-        console.error('Erro no stream do YouTube:', err);
-        if (!res.headersSent) {
-          res.status(500).send('Erro ao transmitir o áudio');
-        } else {
-          res.end();
-        }
-      });
+    ytProcess.stderr.on('data', (data) => {
+      console.error(`yt-dlp erro: ${data}`);
+    });
 
-      audioStream.pipe(res);
-    } catch (error) {
-      console.error('Erro ao preparar o stream:', error);
-      res.status(500).send('Erro ao processar o áudio do YouTube');
-    }
+    ytProcess.on('error', (error) => {
+      console.error('Erro ao executar yt-dlp:', error);
+      res.status(500).send('Erro ao processar o áudio');
+    });
+
+    ytProcess.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`yt-dlp saiu com código ${code}`);
+        res.status(500).send('Erro ao baixar áudio');
+      }
+    });
   }
 }
 
